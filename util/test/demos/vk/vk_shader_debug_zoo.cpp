@@ -183,6 +183,8 @@ layout(set = 0, binding = 31) uniform sampler2DMSArray queryTestMS;
 
 layout(set = 0, binding = 32) uniform texture2D depthImage;
 
+layout(set = 0, binding = 33, rgba8ui) uniform uimageBuffer texBufferUint;
+layout(set = 0, binding = 34, rgba8ui) uniform coherent uimageBuffer storeTexBufferUint;
 #if TEST_DESC_INDEXING
 
 layout(set = 1, binding = 1) uniform sampler pointSamplers[14];
@@ -1574,6 +1576,17 @@ void main()
         Color.r = Color.r;
       }
       Color += vec4(1.0, 1.0, 1.0, 1.0);
+      break;
+    }
+    case 177:
+    {
+      Color = vec4(imageLoad(texBufferUint, int(zeroi+2)).x, 1, 0, 1);
+      break;
+    }
+    case 178:
+    {
+      imageStore(storeTexBufferUint, int(zeroi+2), uvec4(3, 4, 5, 2));
+      Color = imageLoad(storeTexBufferUint, int(zeroi+2));
       break;
     }
     default: break;
@@ -4118,6 +4131,8 @@ OpMemberDecorate %cbuffer_struct 17 Offset 216    ; double doublePackSource
         {30, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
         {31, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
         {32, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
+        {33, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
+        {34, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
     }));
 
     std::vector<VkDescriptorSetLayout> setLayouts = {setlayout0};
@@ -4643,6 +4658,11 @@ OpMemberDecorate %cbuffer_struct 17 Offset 216    ; double doublePackSource
     VkBufferView store_bufview = createBufferView(
         vkh::BufferViewCreateInfo(store_texbuffer.buffer, VK_FORMAT_R32G32B32A32_SFLOAT));
 
+    VkBufferView bufview_uint =
+        createBufferView(vkh::BufferViewCreateInfo(texbuffer.buffer, VK_FORMAT_R8G8B8A8_UINT));
+    VkBufferView store_bufview_uint =
+        createBufferView(vkh::BufferViewCreateInfo(store_texbuffer.buffer, VK_FORMAT_R8G8B8A8_UINT));
+
     setName(pointsampler, "pointsampler");
     setName(linearsampler, "linearsampler");
     setName(mipsampler, "mipsampler");
@@ -4717,6 +4737,10 @@ OpMemberDecorate %cbuffer_struct 17 Offset 216    ; double doublePackSource
             vkh::WriteDescriptorSet(
                 descset0, 32, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
                 {vkh::DescriptorImageInfo(shadowview, VK_IMAGE_LAYOUT_GENERAL, VK_NULL_HANDLE)}),
+            vkh::WriteDescriptorSet(descset0, 33, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+                                    {bufview_uint}),
+            vkh::WriteDescriptorSet(descset0, 34, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+                                    {store_bufview_uint}),
         });
 
     if(descIndexing)

@@ -1705,35 +1705,73 @@ private:
 
         if(imgData.view != ResourceId())
         {
-          const VulkanCreationInfo::ImageView &viewProps =
+          const VulkanCreationInfo::ImageView &imgViewProps =
               m_Creation.m_ImageView[m_pDriver->GetResourceManager()->GetLiveID(imgData.view)];
-          const VulkanCreationInfo::Image &imageProps = m_Creation.m_Image[viewProps.image];
+          const VulkanCreationInfo::BufferView &bufViewProps =
+              m_Creation.m_BufferView[m_pDriver->GetResourceManager()->GetLiveID(imgData.view)];
 
-          uint32_t mip = viewProps.range.baseMipLevel;
+          bool resourceIsImage = false;
+          uint32_t mip = 0;
+          uint32_t numSlices = 0;
+          uint32_t numSamples = 0;
 
-          data.width = RDCMAX(1U, imageProps.extent.width >> mip);
-          data.height = RDCMAX(1U, imageProps.extent.height >> mip);
-          if(imageProps.type == VK_IMAGE_TYPE_3D)
+          if(imgViewProps.image != ResourceId())
           {
-            data.depth = RDCMAX(1U, imageProps.extent.depth >> mip);
+            resourceIsImage = true;
+            const VulkanCreationInfo::Image &imageProps = m_Creation.m_Image[imgViewProps.image];
+
+            mip = imgViewProps.range.baseMipLevel;
+
+            data.width = RDCMAX(1U, imageProps.extent.width >> mip);
+            data.height = RDCMAX(1U, imageProps.extent.height >> mip);
+            if(imageProps.type == VK_IMAGE_TYPE_3D)
+            {
+              data.depth = RDCMAX(1U, imageProps.extent.depth >> mip);
+            }
+            else
+            {
+              data.depth = imgViewProps.range.layerCount;
+              if(data.depth == VK_REMAINING_ARRAY_LAYERS)
+                data.depth = imageProps.arrayLayers - imgViewProps.range.baseArrayLayer;
+            }
+
+            ResourceFormat fmt = MakeResourceFormat(imageProps.format);
+
+            data.fmt = MakeResourceFormat(imageProps.format);
+            data.texelSize = (uint32_t)GetByteSize(1, 1, 1, imageProps.format, 0);
+            data.rowPitch = (uint32_t)GetByteSize(data.width, 1, 1, imageProps.format, 0);
+            data.slicePitch = GetByteSize(data.width, data.height, 1, imageProps.format, 0);
+            data.samplePitch = GetByteSize(data.width, data.height, data.depth, imageProps.format, 0);
+
+            numSlices = imageProps.type == VK_IMAGE_TYPE_3D ? 1 : data.depth;
+            numSamples = (uint32_t)imageProps.samples;
+          }
+          else if(bufViewProps.buffer != ResourceId())
+          {
+            const VulkanCreationInfo::Buffer &bufferProps = m_Creation.m_Buffer[bufViewProps.buffer];
+
+            ResourceFormat fmt = MakeResourceFormat(bufViewProps.format);
+
+            mip = 0;
+            data.width = (uint32_t)(bufferProps.size / (fmt.compByteWidth * fmt.compCount));
+            data.height = 1;
+            data.depth = 1;
+
+            data.fmt = fmt;
+            data.texelSize = (uint32_t)GetByteSize(1, 1, 1, bufViewProps.format, 0);
+            data.rowPitch = (uint32_t)GetByteSize(data.width, 1, 1, bufViewProps.format, 0);
+            data.slicePitch = GetByteSize(data.width, data.height, 1, bufViewProps.format, 0);
+            data.samplePitch =
+                GetByteSize(data.width, data.height, data.depth, bufViewProps.format, 0);
+
+            numSlices = 1;
+            numSamples = data.width;
           }
           else
           {
-            data.depth = viewProps.range.layerCount;
-            if(data.depth == VK_REMAINING_ARRAY_LAYERS)
-              data.depth = imageProps.arrayLayers - viewProps.range.baseArrayLayer;
+            // Should be unreachable. If we have a view to neither a valid image or buffer, something is wrong
+            RDCASSERT(false);
           }
-
-          ResourceFormat fmt = MakeResourceFormat(imageProps.format);
-
-          data.fmt = MakeResourceFormat(imageProps.format);
-          data.texelSize = (uint32_t)GetByteSize(1, 1, 1, imageProps.format, 0);
-          data.rowPitch = (uint32_t)GetByteSize(data.width, 1, 1, imageProps.format, 0);
-          data.slicePitch = GetByteSize(data.width, data.height, 1, imageProps.format, 0);
-          data.samplePitch = GetByteSize(data.width, data.height, data.depth, imageProps.format, 0);
-
-          const uint32_t numSlices = imageProps.type == VK_IMAGE_TYPE_3D ? 1 : data.depth;
-          const uint32_t numSamples = (uint32_t)imageProps.samples;
 
           data.bytes.reserve(size_t(data.samplePitch * numSamples));
 
@@ -1745,8 +1783,17 @@ private:
             for(uint32_t slice = 0; slice < numSlices; slice++)
             {
               bytebuf subBytes;
-              m_pDriver->GetReplay()->GetTextureData(
-                  viewProps.image, Subresource(mip, slice, sample), params, subBytes);
+              if(resourceIsImage)
+              {
+                m_pDriver->GetReplay()->GetTextureData(
+                    imgViewProps.image, Subresource(mip, slice, sample), params, subBytes);
+              }
+              else
+              {
+                const uint64_t length = data.samplePitch;
+                const uint64_t offset = bufViewProps.offset + ((slice * numSamples) + sample);
+                m_pDriver->GetReplay()->GetBufferData(bufViewProps.buffer, offset, length, subBytes);
+              }
 
               // fast path, swap into output if there's only one slice and one sample (common case)
               if(numSlices == 1 && numSamples == 1)
